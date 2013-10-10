@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"code.google.com/p/go.net/html"
 	"encoding/json"
 	"encoding/xml"
@@ -29,22 +30,26 @@ var (
 )
 
 const (
-	Version     = "0.1.0"
+	Version     = "0.2.0"
 	readability = "http://www.readability.com/api/content/v1/parser"
 )
 
 type rss struct {
 	Channels []Channel `xml:"channel"`
+	Version  string    `xml:"version,attr"`
 }
 
 type Channel struct {
-	Title       string `xml:"title"`
-	Link        string `xml:"link"`
-	Description string `xml:"description"`
-	WebMaster   string `xml:"webMaster,omitempty"`
-	//LastBuildDate time.Time `xml:"lastBuildDate"`
-	Generator string `xml:"generator"`
-	Items     []Item `xml:"item"`
+	Docs          string
+	Title         string `xml:"title"`
+	Link          string `xml:"link"`
+	Description   string `xml:"description"`
+	Language      string `xml:"language"`
+	WebMaster     string `xml:"webMaster,omitempty"`
+	Generator     string `xml:"generator"`
+	PubDate       string `xml:"pubDate"`
+	LastBuildDate string `xml:"lastBuildDate"`
+	Items         []Item `xml:"item"`
 }
 
 type Item struct {
@@ -59,18 +64,20 @@ type Item struct {
 }
 
 type ReadabilityResp struct {
-	Content       string
-	Author        string
-	Url           url.URL
-	ShortUrl      url.URL `json:"short_url"`
-	Title         string
-	Excerpt       string
-	DatePublished time.Time `json:"date_published"`
+	Author     string
+	Content    string
+	Domain     string
+	Title      string
+	Excerpt    string
+	Direction  string
+	WordCount  int `json:"word_count"`
+	TotalPages int `json:"total_pages"`
+	NextPageId int `json:"next_page_id,omitempty"`
 }
 
 func mkItem(desc string) (Item, error) {
 	var nodes []*html.Node
-	var item Item
+	var link, title, content string
 	var find func(*html.Node)
 	doc, err := html.Parse(strings.NewReader(desc))
 	if err != nil {
@@ -91,31 +98,37 @@ func mkItem(desc string) (Item, error) {
 		var err error
 		for _, a := range v.Attr {
 			if a.Key == "href" {
-				item.Link = a.Val
+				link = a.Val
 				break
 			}
 		}
-		item.Description, err = fetchText(item.Link)
+		title, content, err = readable(link)
 		if err != nil {
 			log.Printf("%+v\n", err)
 			continue
 		}
 	}
-	return item, nil
+	return Item{Title: title, Link: link, Description: content, GUID: link}, nil
 }
 
-func fetchText(article string) (string, error) {
+func readable(article string) (string, string, error) {
+	var r ReadabilityResp
 	h := fnv.New64a()
 	io.WriteString(h, article)
 	key := fmt.Sprintf("%x", h.Sum(nil))
-	r := new(ReadabilityResp)
 	if cache.Has(key) {
 		log.Printf("cache hit for %s\n", article)
+		var c ReadabilityResp
 		b, err := cache.Read(key)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		return string(b), nil
+		d := json.NewDecoder(bytes.NewReader(b))
+		err = d.Decode(&c)
+		if err != nil {
+			return "", "", err
+		}
+		return c.Title, html.EscapeString(c.Content), nil
 	}
 	log.Printf("fetching '%s'\n", article)
 	v := url.Values{}
@@ -123,17 +136,23 @@ func fetchText(article string) (string, error) {
 	v.Add("url", article)
 	res, err := http.Get(fmt.Sprintf("%s?%s", readability, v.Encode()))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	defer res.Body.Close()
 	d := json.NewDecoder(res.Body)
 	d.Decode(&r)
-	s := html.EscapeString(r.Content)
-	err = cache.Write(key, []byte(s))
+	defer res.Body.Close()
+	log.Println(r.Title)
+	title := r.Title
+	log.Println(title)
+	b, err := json.Marshal(r)
+	if err != nil {
+		return "", "", err
+	}
+	err = cache.Write(key, b)
 	if err != nil {
 		log.Println(err)
 	}
-	return s, nil
+	return title, html.EscapeString(r.Content), nil
 }
 
 func init() {
@@ -197,13 +216,24 @@ func main() {
 					log.Fatal(err)
 				}
 				defer feed.Close()
+				io.WriteString(feed, xml.Header)
 				e := xml.NewEncoder(feed)
-				var f rss = rss{[]Channel{Channel{
-					Title:     reddit,
-					Link:      fmt.Sprintf("http://www.reddit.com/r/%s", reddit),
-					Generator: fmt.Sprintf("dereddit v%s", Version),
-					Items:     items,
-				}}}
+				e.Indent("", "\t")
+				now := time.Now().UTC().Format(time.RFC822)
+				var f rss = rss{
+					Version: "2.0",
+					Channels: []Channel{Channel{
+						Title:         reddit,
+						Docs:          "http://blogs.law.harvard.edu/tech/rss",
+						Language:      "en-us",
+						PubDate:       now,
+						LastBuildDate: now,
+						Description:   fmt.Sprintf("Articles pulled from /r/%s", reddit),
+						Link:          fmt.Sprintf("http://www.reddit.com/r/%s", reddit),
+						Generator:     fmt.Sprintf("dereddit v%s", Version),
+						Items:         items},
+					},
+				}
 				err = e.Encode(f)
 				if err != nil {
 					log.Println(err)
@@ -211,7 +241,7 @@ func main() {
 			}
 		}(reddit, ticker.C, manual)
 	}
-	manual <- time.Now()
+	manual <- time.Now().UTC()
 	log.Println("Starting HTTP server")
 	log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(rssDir))))
 }
