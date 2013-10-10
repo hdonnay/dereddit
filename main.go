@@ -141,9 +141,7 @@ func readable(article string) (string, string, error) {
 	d := json.NewDecoder(res.Body)
 	d.Decode(&r)
 	defer res.Body.Close()
-	log.Println(r.Title)
 	title := r.Title
-	log.Println(title)
 	b, err := json.Marshal(r)
 	if err != nil {
 		return "", "", err
