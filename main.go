@@ -175,10 +175,12 @@ func init() {
 }
 
 func main() {
-	var manual chan time.Time = make(chan time.Time)
+	var manual []chan time.Time
+	//var manual chan time.Time = make(chan time.Time)
 	ticker := time.NewTicker(time.Duration(*update) * time.Minute)
-	for _, reddit := range subreddits {
+	for i, reddit := range subreddits {
 		log.Printf("Launching goroutine for %s\n", reddit)
+		manual = append(manual, make(chan time.Time))
 		go func(reddit string, update <-chan time.Time, manual <-chan time.Time) {
 			var u time.Time
 			for {
@@ -237,9 +239,11 @@ func main() {
 					log.Println(err)
 				}
 			}
-		}(reddit, ticker.C, manual)
+		}(reddit, ticker.C, manual[i])
 	}
-	manual <- time.Now().UTC()
+	for i, _ := range subreddits {
+		manual[i] <- time.Now().UTC()
+	}
 	log.Println("Starting HTTP server")
 	log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(rssDir))))
 }
