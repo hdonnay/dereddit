@@ -128,7 +128,7 @@ func readable(article string) (string, string, error) {
 		if err != nil {
 			return "", "", err
 		}
-		return c.Title, html.EscapeString(c.Content), nil
+		return c.Title, c.Content, nil
 	}
 	log.Printf("fetching '%s'\n", article)
 	v := url.Values{}
@@ -150,7 +150,7 @@ func readable(article string) (string, string, error) {
 	if err != nil {
 		log.Println(err)
 	}
-	return title, html.EscapeString(r.Content), nil
+	return title, r.Content, nil
 }
 
 func init() {
