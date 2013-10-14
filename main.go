@@ -30,7 +30,7 @@ var (
 )
 
 const (
-	Version     = "0.2.0"
+	Version     = "0.2.1"
 	readability = "http://www.readability.com/api/content/v1/parser"
 )
 
