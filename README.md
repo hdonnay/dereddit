@@ -1,6 +1,13 @@
 dereddit
 ========
 
+Want to use the hivemind to dump stories directly into your feedreader? Now you
+can.
+
+`dereddit` takes an rss feed from reddit and strips out the reddit parts. It
+uses [Readability](http://www.readability.com) to fetch the content from the
+resulting links and serve it back to you.
+
 building
 --------
 
