@@ -11,6 +11,13 @@ resulting links and serve it back to you.
 building
 --------
 
+	% go get github.com/hdonnay/dereddit
+	% go install github.com/hdonnay/dereddit
+
+or
+
+	% git clone https://github.com/hdonnay/dereddit
+	% cd dereddit
     % go run make.go
 
 help
