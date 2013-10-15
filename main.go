@@ -30,7 +30,7 @@ var (
 )
 
 const (
-	Version     = "0.2.1"
+	Version     = "0.2.2"
 	readability = "http://www.readability.com/api/content/v1/parser"
 )
 
@@ -77,7 +77,8 @@ type ReadabilityResp struct {
 
 func mkItem(desc string) (Item, error) {
 	var nodes []*html.Node
-	var link, title, content string
+	var link string
+	var r ReadabilityResp
 	var find func(*html.Node)
 	doc, err := html.Parse(strings.NewReader(desc))
 	if err != nil {
@@ -102,33 +103,32 @@ func mkItem(desc string) (Item, error) {
 				break
 			}
 		}
-		title, content, err = readable(link)
+		r, err = readable(link)
 		if err != nil {
 			log.Printf("%+v\n", err)
 			continue
 		}
 	}
-	return Item{Title: title, Link: link, Description: content, GUID: link}, nil
+	return Item{Title: r.Title, Link: link, Description: r.Content, Author: r.Author, GUID: link}, nil
 }
 
-func readable(article string) (string, string, error) {
-	var r ReadabilityResp
+func readable(article string) (r ReadabilityResp, err error) {
 	h := fnv.New64a()
 	io.WriteString(h, article)
 	key := fmt.Sprintf("%x", h.Sum(nil))
 	if cache.Has(key) {
+		var b []byte
 		log.Printf("cache hit for %s\n", article)
-		var c ReadabilityResp
-		b, err := cache.Read(key)
+		b, err = cache.Read(key)
 		if err != nil {
-			return "", "", err
+			return
 		}
 		d := json.NewDecoder(bytes.NewReader(b))
-		err = d.Decode(&c)
+		err = d.Decode(&r)
 		if err != nil {
-			return "", "", err
+			return
 		}
-		return c.Title, c.Content, nil
+		return
 	}
 	log.Printf("fetching '%s'\n", article)
 	v := url.Values{}
@@ -136,21 +136,20 @@ func readable(article string) (string, string, error) {
 	v.Add("url", article)
 	res, err := http.Get(fmt.Sprintf("%s?%s", readability, v.Encode()))
 	if err != nil {
-		return "", "", err
+		return
 	}
 	d := json.NewDecoder(res.Body)
 	d.Decode(&r)
 	defer res.Body.Close()
-	title := r.Title
 	b, err := json.Marshal(r)
 	if err != nil {
-		return "", "", err
+		return
 	}
 	err = cache.Write(key, b)
 	if err != nil {
 		log.Println(err)
 	}
-	return title, r.Content, nil
+	return
 }
 
 func init() {
