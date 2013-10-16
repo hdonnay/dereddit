@@ -19,14 +19,17 @@ import (
 )
 
 var (
-	apiKey     = flag.String("a", "", "Readibility API Key")
-	sr         = flag.String("r", "golang", "comma separated list of subreddits to create rss feeds for.")
-	update     = flag.Int("u", 30, "update interval (in minutes)")
-	listen     = flag.String("l", ":8080", "Address to listen on")
-	cacheFile  = flag.String("c", fmt.Sprintf("%s/cache.diskv", os.TempDir()), "Cache file")
-	subreddits []string
-	rssDir     = fmt.Sprintf("%s/%s", os.TempDir(), "dereddit")
-	cache      *diskv.Diskv
+	apiKey    = flag.String("a", "", "Readibility API Key")
+	sr        = flag.String("r", "golang", "comma separated list of subreddits to create rss feeds for.")
+	update    = flag.Int("u", 30, "update interval (in minutes)")
+	listen    = flag.String("l", ":8080", "Address to listen on")
+	cacheFile = flag.String("c", fmt.Sprintf("%s/cache.diskv", os.TempDir()), "Cache file")
+	ul        = flag.String("U", "", "comma separated list of users to ignore.")
+
+	rssDir        = fmt.Sprintf("%s/%s", os.TempDir(), "dereddit")
+	cache         *diskv.Diskv
+	subreddits    []string
+	userBlacklist []string
 )
 
 const (
@@ -75,41 +78,72 @@ type ReadabilityResp struct {
 	NextPageId int `json:"next_page_id,omitempty"`
 }
 
-func mkItem(desc string) (Item, error) {
-	var nodes []*html.Node
-	var link string
-	var r ReadabilityResp
-	var find func(*html.Node)
-	doc, err := html.Parse(strings.NewReader(desc))
+type redditStub struct {
+	Link     string
+	User     string
+	Comments string
+}
+
+func parseStub(stub string) (r redditStub, err error) {
+	var extract func(*html.Node)
+	var doc *html.Node
+	doc, err = html.Parse(strings.NewReader(stub))
 	if err != nil {
-		return Item{}, err
+		return
 	}
-	find = func(n *html.Node) {
+	extract = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
-			if n.FirstChild.Data == "[link]" {
-				nodes = append(nodes, n)
+			switch {
+			case n.FirstChild.Data == "[link]":
+				r.Link = n.Attr[0].Val
+			case strings.HasSuffix(n.FirstChild.Data, " comments]"):
+				r.Comments = n.Attr[0].Val
+			case strings.HasPrefix(n.Attr[0].Val, "http://www.reddit.com/user/"):
+				r.User = strings.TrimSpace(n.FirstChild.Data)
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			find(c)
+			extract(c)
 		}
 	}
-	find(doc)
-	for _, v := range nodes {
-		var err error
-		for _, a := range v.Attr {
-			if a.Key == "href" {
-				link = a.Val
-				break
-			}
-		}
-		r, err = readable(link)
-		if err != nil {
-			log.Printf("%+v\n", err)
-			continue
+	extract(doc)
+	return
+}
+
+func mkItem(desc string) (*Item, error) {
+	var i Item
+	var err error
+	var r ReadabilityResp
+	var s redditStub
+	s, err = parseStub(desc)
+	if err != nil {
+		return nil, err
+	}
+	if s.Link == s.Comments {
+		log.Printf("Ignoring: %s (self post)\n", s.Link)
+		return nil, nil
+	}
+	for _, u := range userBlacklist {
+		if u == s.User {
+			log.Printf("Ignoring: %s (bad user: %s)\n", s.Link, u)
+			return nil, nil
 		}
 	}
-	return Item{Title: r.Title, Link: link, Description: r.Content, Author: r.Author, GUID: link}, nil
+	r, err = readable(s.Link)
+	if err != nil {
+		return nil, err
+	}
+	i.Title = r.Title
+	i.Link = s.Link
+	i.GUID = s.Link
+	i.Comments = s.Comments
+	i.Description = r.Content
+	if r.Author != "" {
+		i.Author = r.Author
+	} else {
+		i.Author = fmt.Sprintf("submitted by %s", s.User)
+	}
+	return &i, nil
 }
 
 func readable(article string) (r ReadabilityResp, err error) {
@@ -118,7 +152,7 @@ func readable(article string) (r ReadabilityResp, err error) {
 	key := fmt.Sprintf("%x", h.Sum(nil))
 	if cache.Has(key) {
 		var b []byte
-		log.Printf("cache hit for %s\n", article)
+		log.Printf("Cache hit: %s\n", article)
 		b, err = cache.Read(key)
 		if err != nil {
 			return
@@ -130,7 +164,7 @@ func readable(article string) (r ReadabilityResp, err error) {
 		}
 		return
 	}
-	log.Printf("fetching '%s'\n", article)
+	log.Printf("Fetching: %s\n", article)
 	v := url.Values{}
 	v.Add("token", *apiKey)
 	v.Add("url", article)
@@ -156,6 +190,8 @@ func init() {
 	flag.Parse()
 	subreddits = strings.Split(*sr, ",")
 	log.Printf("watching subreddits: %v\n", subreddits)
+	userBlacklist = strings.Split(*ul, ",")
+	log.Printf("ignoring users: %v\n", userBlacklist)
 	os.Mkdir(rssDir, 0777)
 	if *apiKey == "" {
 		log.Fatalln("api key not specified")
@@ -184,9 +220,9 @@ func main() {
 			var u time.Time
 			for {
 				select {
-				case u := <-update:
+				case u = <-update:
 					log.Printf("recvd tick (%v) to update /r/%s\n", u, reddit)
-				case <-manual:
+				case u = <-manual:
 					log.Printf("recvd manual tick (%v) to update /r/%s\n", u, reddit)
 				}
 				var subreddit rss
@@ -208,13 +244,15 @@ func main() {
 						log.Println(err)
 						continue
 					}
-					items = append(items, ni)
+					if ni == nil {
+						continue
+					}
+					items = append(items, *ni)
 				}
 				feed, err := os.Create(fmt.Sprintf("%s/%s.xml", rssDir, reddit))
 				if err != nil {
 					log.Fatal(err)
 				}
-				defer feed.Close()
 				io.WriteString(feed, xml.Header)
 				e := xml.NewEncoder(feed)
 				e.Indent("", "\t")
@@ -237,6 +275,7 @@ func main() {
 				if err != nil {
 					log.Println(err)
 				}
+				feed.Close()
 			}
 		}(reddit, ticker.C, manual[i])
 	}
