@@ -25,6 +25,7 @@ var (
 	listen    = flag.String("l", ":8080", "Address to listen on")
 	cacheFile = flag.String("c", fmt.Sprintf("%s/cache.diskv", os.TempDir()), "Cache file")
 	ul        = flag.String("U", "", "comma separated list of users to ignore.")
+	selfOK    = flag.Bool("s", false, "Allow self posts into generated feed.")
 
 	rssDir        = fmt.Sprintf("%s/%s", os.TempDir(), "dereddit")
 	cache         *diskv.Diskv
@@ -119,7 +120,7 @@ func mkItem(desc string) (*Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.Link == s.Comments {
+	if s.Link == s.Comments && !*selfOK {
 		log.Printf("Ignoring: %s (self post)\n", s.Link)
 		return nil, nil
 	}
