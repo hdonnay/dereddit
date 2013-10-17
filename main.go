@@ -33,6 +33,7 @@ var (
 	cache         *diskv.Diskv
 	subreddits    []string
 	userBlacklist []string
+	noUpdate      = false
 )
 
 const (
@@ -217,6 +218,9 @@ func main() {
 	sigusr1 := make(chan os.Signal, 1)
 	signal.Notify(sigusr1, syscall.SIGUSR1)
 
+	toggleUpdate := make(chan os.Signal, 1)
+	signal.Notify(toggleUpdate, syscall.SIGUSR2)
+
 	ticker := time.NewTicker(time.Duration(*update) * time.Minute)
 
 	for i, reddit := range subreddits {
@@ -227,7 +231,12 @@ func main() {
 			for {
 				select {
 				case u = <-update:
-					log.Printf("recvd tick (%v) to update /r/%s\n", u, reddit)
+					if noUpdate {
+						log.Printf("ignoring tick (%v) to update /r/%s\n", u, reddit)
+						continue
+					} else {
+						log.Printf("recvd tick (%v) to update /r/%s\n", u, reddit)
+					}
 				case u = <-manual:
 					log.Printf("recvd manual tick (%v) to update /r/%s\n", u, reddit)
 				}
@@ -285,6 +294,17 @@ func main() {
 			}
 		}(reddit, ticker.C, manual[i])
 	}
+
+	go func(c <-chan os.Signal) {
+		for _ = range c {
+			noUpdate = !noUpdate
+			if noUpdate {
+				log.Println("automatic updates: off")
+			} else {
+				log.Println("automatic updates: on")
+			}
+		}
+	}(toggleUpdate)
 
 	go func(c <-chan os.Signal) {
 		for _ = range c {
