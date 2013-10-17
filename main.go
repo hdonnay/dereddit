@@ -14,7 +14,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -212,8 +214,11 @@ func init() {
 
 func main() {
 	var manual []chan time.Time
-	//var manual chan time.Time = make(chan time.Time)
+	sigusr1 := make(chan os.Signal, 1)
+	signal.Notify(sigusr1, syscall.SIGUSR1)
+
 	ticker := time.NewTicker(time.Duration(*update) * time.Minute)
+
 	for i, reddit := range subreddits {
 		log.Printf("Launching goroutine for %s\n", reddit)
 		manual = append(manual, make(chan time.Time))
@@ -280,9 +285,16 @@ func main() {
 			}
 		}(reddit, ticker.C, manual[i])
 	}
-	for i, _ := range subreddits {
-		manual[i] <- time.Now().UTC()
-	}
+
+	go func(c <-chan os.Signal) {
+		for _ = range c {
+			for i, _ := range subreddits {
+				manual[i] <- time.Now().UTC()
+			}
+		}
+	}(sigusr1)
+	sigusr1 <- syscall.SIGUSR1
+
 	log.Println("Starting HTTP server")
 	log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(rssDir))))
 }
