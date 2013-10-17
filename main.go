@@ -191,6 +191,14 @@ func readable(article string) (r ReadabilityResp, err error) {
 }
 
 func init() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Updates can be triggered by sending SIGUSR1.")
+		fmt.Fprintln(os.Stderr, "Automatic updates can be toggled by senging SIGUSR2.")
+		fmt.Fprintln(os.Stderr)
+	}
 	flag.Parse()
 	subreddits = strings.Split(*sr, ",")
 	log.Printf("watching subreddits: %v\n", subreddits)
