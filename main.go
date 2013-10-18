@@ -81,7 +81,7 @@ type ReadabilityResp struct {
 	WordCount  int       `json:"word_count"`
 	TotalPages int       `json:"total_pages"`
 	NextPageId int       `json:"next_page_id,omitempty"`
-	Date       time.Time `json:"omitempty"`
+	Date       time.Time `json:",omitempty"`
 }
 
 type redditStub struct {
