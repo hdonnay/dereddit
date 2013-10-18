@@ -28,6 +28,7 @@ var (
 	cacheFile = flag.String("c", fmt.Sprintf("%s/cache.diskv", os.TempDir()), "Cache file")
 	ul        = flag.String("U", "", "comma separated list of users to ignore.")
 	selfOK    = flag.Bool("s", false, "Allow self posts into generated feed.")
+	purgeTime = flag.Int("P", 7, "Time to purge articles after, in days.")
 
 	rssDir        = fmt.Sprintf("%s/%s", os.TempDir(), "dereddit")
 	cache         *diskv.Diskv
@@ -77,9 +78,10 @@ type ReadabilityResp struct {
 	Title      string
 	Excerpt    string
 	Direction  string
-	WordCount  int `json:"word_count"`
-	TotalPages int `json:"total_pages"`
-	NextPageId int `json:"next_page_id,omitempty"`
+	WordCount  int       `json:"word_count"`
+	TotalPages int       `json:"total_pages"`
+	NextPageId int       `json:"next_page_id,omitempty"`
+	Date       time.Time `json:"omitempty"`
 }
 
 type redditStub struct {
@@ -150,23 +152,31 @@ func mkItem(desc string) (*Item, error) {
 	return &i, nil
 }
 
-func readable(article string) (r ReadabilityResp, err error) {
+func urlToKey(url string) (key string) {
 	h := fnv.New64a()
-	io.WriteString(h, article)
-	key := fmt.Sprintf("%x", h.Sum(nil))
-	if cache.Has(key) {
-		var b []byte
-		log.Printf("Cache hit: %s\n", article)
-		b, err = cache.Read(key)
-		if err != nil {
-			return
-		}
-		d := json.NewDecoder(bytes.NewReader(b))
-		err = d.Decode(&r)
-		if err != nil {
-			return
-		}
+	io.WriteString(h, url)
+	key = fmt.Sprintf("%x", h.Sum(nil))
+	return
+}
+
+func loadCache(key string) (r ReadabilityResp) {
+	b, err := cache.Read(key)
+	if err != nil {
 		return
+	}
+	d := json.NewDecoder(bytes.NewReader(b))
+	err = d.Decode(&r)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func readable(article string) (r ReadabilityResp, err error) {
+	key := urlToKey(article)
+	if cache.Has(key) {
+		log.Printf("Cache hit: %s\n", article)
+		return loadCache(key), nil
 	}
 	log.Printf("Fetching: %s\n", article)
 	v := url.Values{}
@@ -178,6 +188,7 @@ func readable(article string) (r ReadabilityResp, err error) {
 	}
 	d := json.NewDecoder(res.Body)
 	d.Decode(&r)
+	r.Date = time.Now().UTC()
 	defer res.Body.Close()
 	b, err := json.Marshal(r)
 	if err != nil {
@@ -196,7 +207,8 @@ func init() {
 		flag.PrintDefaults()
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Updates can be triggered by sending SIGUSR1.")
-		fmt.Fprintln(os.Stderr, "Automatic updates can be toggled by senging SIGUSR2.")
+		fmt.Fprintln(os.Stderr, "Automatic updates can be toggled by sending SIGUSR2.")
+		fmt.Fprintln(os.Stderr, "A cache purge can be triggered by sending SIGHUP.")
 		fmt.Fprintln(os.Stderr)
 	}
 	flag.Parse()
@@ -228,6 +240,9 @@ func main() {
 
 	toggleUpdate := make(chan os.Signal, 1)
 	signal.Notify(toggleUpdate, syscall.SIGUSR2)
+
+	cleanCache := make(chan os.Signal, 1)
+	signal.Notify(cleanCache, syscall.SIGHUP)
 
 	ticker := time.NewTicker(time.Duration(*update) * time.Minute)
 
@@ -302,6 +317,24 @@ func main() {
 			}
 		}(reddit, ticker.C, manual[i])
 	}
+
+	go func(c <-chan os.Signal) {
+		tick := time.Tick(time.Duration(12) * time.Hour)
+		for {
+			select {
+			case <-c:
+			case <-tick:
+			}
+			log.Println("Cache clean triggered.")
+			for c := range cache.Keys() {
+				a := loadCache(c)
+				if time.Since(a.Date) > (time.Duration(*purgeTime) * (time.Duration(24) * time.Hour)) {
+					log.Printf("Expiring cache: %s\n", c)
+					cache.Erase(c)
+				}
+			}
+		}
+	}(cleanCache)
 
 	go func(c <-chan os.Signal) {
 		for _ = range c {
