@@ -25,12 +25,11 @@ var (
 	sr        = flag.String("r", "golang", "comma separated list of subreddits to create rss feeds for.")
 	update    = flag.Int("u", 30, "update interval (in minutes)")
 	listen    = flag.String("l", ":8080", "Address to listen on")
-	cacheFile = flag.String("c", fmt.Sprintf("%s/cache.diskv", os.TempDir()), "Cache file")
 	ul        = flag.String("U", "", "comma separated list of users to ignore.")
 	selfOK    = flag.Bool("s", false, "Allow self posts into generated feed.")
 	purgeTime = flag.Int("P", 7, "Time to purge articles after, in days.")
 
-	rssDir        = fmt.Sprintf("%s/%s", os.TempDir(), "dereddit")
+	rssDir        = fmt.Sprintf("%s/dereddit", os.TempDir())
 	cache         *diskv.Diskv
 	subreddits    []string
 	userBlacklist []string
@@ -216,21 +215,19 @@ func init() {
 	log.Printf("watching subreddits: %v\n", subreddits)
 	userBlacklist = strings.Split(*ul, ",")
 	log.Printf("ignoring users: %v\n", userBlacklist)
+	cacheDir := fmt.Sprintf("%s/dereddit.cache", os.TempDir())
 	os.Mkdir(rssDir, 0777)
 	if *apiKey == "" {
 		log.Fatalln("api key not specified")
 	}
-	if *cacheFile == "" {
-		log.Fatalln("cache file is empty")
-	}
 	o := diskv.Options{
-		BasePath:    *cacheFile,
+		BasePath:    cacheDir,
 		Compression: diskv.NewGzipCompression(),
 		PathPerm:    0755,
 		FilePerm:    0666,
 	}
 	cache = diskv.New(o)
-	log.Printf("cache %s opened\n", *cacheFile)
+	log.Printf("cache %s opened\n", cacheDir)
 }
 
 func main() {
