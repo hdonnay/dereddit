@@ -119,6 +119,7 @@ func mkItem(desc string) (*Item, error) {
 	var i Item
 	var err error
 	var r ReadabilityResp
+	var resp *http.Response
 	var s redditStub
 	s, err = parseStub(desc)
 	if err != nil {
@@ -134,19 +135,30 @@ func mkItem(desc string) (*Item, error) {
 			return nil, nil
 		}
 	}
-	r, err = readable(s.Link)
+	resp, err = http.Head(s.Link)
 	if err != nil {
 		return nil, err
 	}
-	i.Title = r.Title
 	i.Link = s.Link
 	i.GUID = s.Link
 	i.Comments = s.Comments
-	i.Description = r.Content
-	if r.Author != "" {
-		i.Author = r.Author
-	} else {
-		i.Author = fmt.Sprintf("submitted by %s", s.User)
+	switch {
+	case strings.HasPrefix(resp.Header.Get("Content-Type"), "image/"):
+		log.Printf("Found image: %s\n", s.Link)
+		i.Title = "Image"
+		i.Description = fmt.Sprintf("<img src=\"%s\" alt=\"Image\" />", s.Link)
+	default:
+		r, err = readable(s.Link)
+		if err != nil {
+			return nil, err
+		}
+		i.Title = r.Title
+		i.Description = r.Content
+		if r.Author != "" {
+			i.Author = r.Author
+		} else {
+			i.Author = fmt.Sprintf("submitted by %s", s.User)
+		}
 	}
 	return &i, nil
 }
