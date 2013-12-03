@@ -37,6 +37,7 @@ var (
 )
 
 const (
+	// Version (in case we want to print it out later)
 	Version     = "0.3.0"
 	readability = "http://www.readability.com/api/content/v1/parser"
 )
@@ -46,6 +47,7 @@ type rss struct {
 	Version  string    `xml:"version,attr"`
 }
 
+// Channel is an RSS Channel
 type Channel struct {
 	Docs          string
 	Title         string `xml:"title"`
@@ -59,6 +61,7 @@ type Channel struct {
 	Items         []Item `xml:"item"`
 }
 
+// Item is an RSS Item
 type Item struct {
 	Title       string `xml:"title"`
 	Link        string `xml:"link"`
@@ -70,6 +73,7 @@ type Item struct {
 	//PubDate     time.Time `xml:"pubDate"`
 }
 
+// ReadabilityResp is the response we get back
 type ReadabilityResp struct {
 	Author     string
 	Content    string
@@ -79,7 +83,7 @@ type ReadabilityResp struct {
 	Direction  string
 	WordCount  int       `json:"word_count"`
 	TotalPages int       `json:"total_pages"`
-	NextPageId int       `json:"next_page_id,omitempty"`
+	NextPageID int       `json:"next_page_id,omitempty"`
 	Date       time.Time `json:",omitempty"`
 }
 
@@ -304,7 +308,7 @@ func main() {
 				e := xml.NewEncoder(feed)
 				e.Indent("", "\t")
 				now := time.Now().UTC().Format(time.RFC822)
-				var f rss = rss{
+				f := rss{
 					Version: "2.0",
 					Channels: []Channel{Channel{
 						Title:         reddit,
@@ -358,7 +362,7 @@ func main() {
 
 	go func(c <-chan os.Signal) {
 		for _ = range c {
-			for i, _ := range subreddits {
+			for i := range subreddits {
 				manual[i] <- time.Now().UTC()
 			}
 		}
