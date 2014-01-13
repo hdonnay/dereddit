@@ -31,6 +31,7 @@ var (
 	selfOK    = flag.Bool("s", false, "Allow self posts into generated feed.")
 	purgeTime = flag.Int("P", 7, "Time to purge articles after, in days.")
 	rssDir    = flag.String("d", fmt.Sprintf("%s/dereddit", os.TempDir()), "Directory to output rss feeds to.")
+	verbose   = flag.Bool("v", false, "Print additional information")
 
 	cache         *diskv.Diskv
 	subreddits    []string
@@ -132,12 +133,16 @@ func mkItem(desc string) (*Item, error) {
 		return nil, err
 	}
 	if s.Link == s.Comments && !*selfOK {
-		log.Printf("Ignoring: %s (self post)\n", s.Link)
+		if *verbose {
+			log.Printf("Ignoring: %s (self post)\n", s.Link)
+		}
 		return nil, nil
 	}
 	for _, u := range userBlacklist {
 		if u == s.User {
-			log.Printf("Ignoring: %s (bad user: %s)\n", s.Link, u)
+			if *verbose {
+				log.Printf("Ignoring: %s (bad user: %s)\n", s.Link, u)
+			}
 			return nil, nil
 		}
 	}
@@ -150,7 +155,9 @@ func mkItem(desc string) (*Item, error) {
 	i.Comments = s.Comments
 	switch {
 	case strings.HasPrefix(resp.Header.Get("Content-Type"), "image/"):
-		log.Printf("Found image: %s\n", s.Link)
+		if *verbose {
+			log.Printf("Found image: %s\n", s.Link)
+		}
 		i.Title = "Image"
 		i.Description = fmt.Sprintf("<img src=\"%s\" alt=\"Image\" />", s.Link)
 	default:
@@ -192,10 +199,14 @@ func loadCache(key string) (r ReadabilityResp) {
 func readable(article string) (r ReadabilityResp, err error) {
 	key := urlToKey(article)
 	if cache.Has(key) {
-		log.Printf("Cache hit: %s\n", article)
+		if *verbose {
+			log.Printf("Cache hit: %s\n", article)
+		}
 		return loadCache(key), nil
 	}
-	log.Printf("Fetching: %s\n", article)
+	if *verbose {
+		log.Printf("Fetching: %s\n", article)
+	}
 	v := url.Values{}
 	v.Add("token", *apiKey)
 	v.Add("url", article)
@@ -344,7 +355,9 @@ func main() {
 			for c := range cache.Keys() {
 				a := loadCache(c)
 				if time.Since(a.Date) > (time.Duration(*purgeTime) * (time.Duration(24) * time.Hour)) {
-					log.Printf("Expiring cache: %s\n", c)
+					if *verbose {
+						log.Printf("Expiring cache: %s\n", c)
+					}
 					cache.Erase(c)
 				}
 			}
