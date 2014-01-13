@@ -26,6 +26,7 @@ var (
 	apiKey    = flag.String("a", "", "Readibility API Key")
 	sr        = flag.String("r", "golang", "Comma separated list of subreddits to create rss feeds for.")
 	update    = flag.Int("u", 30, "Update interval (in minutes)")
+	listenOK  = flag.Bool("n", true, "Run internal HTTP server")
 	listen    = flag.String("l", ":8080", "Address to listen on")
 	ul        = flag.String("U", "", "Comma separated list of users to ignore.")
 	selfOK    = flag.Bool("s", false, "Allow self posts into generated feed.")
@@ -388,6 +389,11 @@ func main() {
 	cleanCache <- syscall.SIGHUP
 	sigusr1 <- syscall.SIGUSR1
 
-	log.Println("Starting HTTP server")
-	log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(*rssDir))))
+	if *listenOK {
+		log.Println("Starting HTTP server")
+		log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(*rssDir))))
+	} else {
+		var ch chan bool
+		<-ch
+	}
 }
