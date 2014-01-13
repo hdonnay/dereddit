@@ -368,6 +368,8 @@ func main() {
 			}
 		}
 	}(sigusr1)
+
+	clean() <- syscall.SIGHUP
 	sigusr1 <- syscall.SIGUSR1
 
 	log.Println("Starting HTTP server")
