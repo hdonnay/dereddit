@@ -69,7 +69,7 @@ type Item struct {
 	Author      string `xml:"author,omitempty"`
 	Category    string `xml:"category,omitempty"`
 	Comments    string `xml:"comments,omitempty"`
-	GUID        string `xml:"guid",omitempty`
+	GUID        string `xml:"guid,omitempty"`
 	//PubDate     time.Time `xml:"pubDate"`
 }
 
