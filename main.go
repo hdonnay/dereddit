@@ -246,6 +246,7 @@ func init() {
 	}
 	cache = diskv.New(o)
 	log.Printf("cache %s opened\n", cacheDir)
+	log.Printf("outputting rss feeds to %s\n", *rssDir)
 }
 
 func main() {
