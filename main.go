@@ -257,9 +257,8 @@ func main() {
 	cleanCache := make(chan os.Signal, 1)
 	signal.Notify(cleanCache, syscall.SIGHUP)
 
-	ticker := time.NewTicker(time.Duration(*update) * time.Minute)
-
 	for i, reddit := range subreddits {
+		ticker := time.NewTicker(time.Duration(*update) * time.Minute)
 		log.Printf("Launching goroutine for %s\n", reddit)
 		manual = append(manual, make(chan time.Time))
 		go func(reddit string, update <-chan time.Time, manual <-chan time.Time) {
