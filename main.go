@@ -41,7 +41,7 @@ var (
 
 const (
 	// Version (in case we want to print it out later)
-	Version     = "0.3.0"
+	Version     = "0.4.0"
 	readability = "http://www.readability.com/api/content/v1/parser"
 )
 
