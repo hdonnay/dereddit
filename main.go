@@ -24,14 +24,14 @@ import (
 
 var (
 	apiKey    = flag.String("a", "", "Readibility API Key")
-	sr        = flag.String("r", "golang", "comma separated list of subreddits to create rss feeds for.")
-	update    = flag.Int("u", 30, "update interval (in minutes)")
+	sr        = flag.String("r", "golang", "Comma separated list of subreddits to create rss feeds for.")
+	update    = flag.Int("u", 30, "Update interval (in minutes)")
 	listen    = flag.String("l", ":8080", "Address to listen on")
-	ul        = flag.String("U", "", "comma separated list of users to ignore.")
+	ul        = flag.String("U", "", "Comma separated list of users to ignore.")
 	selfOK    = flag.Bool("s", false, "Allow self posts into generated feed.")
 	purgeTime = flag.Int("P", 7, "Time to purge articles after, in days.")
+	rssDir    = flag.String("d", fmt.Sprintf("%s/dereddit", os.TempDir()), "Directory to output rss feeds to.")
 
-	rssDir        = fmt.Sprintf("%s/dereddit", os.TempDir())
 	cache         *diskv.Diskv
 	subreddits    []string
 	userBlacklist []string
