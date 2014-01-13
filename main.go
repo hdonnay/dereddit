@@ -273,7 +273,9 @@ func main() {
 
 	for i, reddit := range subreddits {
 		ticker := time.NewTicker(time.Duration(*update) * time.Minute)
-		log.Printf("Launching goroutine for %s\n", reddit)
+		if *verbose {
+			log.Printf("Launching goroutine for %s\n", reddit)
+		}
 		manual = append(manual, make(chan time.Time))
 		go func(reddit string, update <-chan time.Time, manual <-chan time.Time) {
 			var u time.Time
