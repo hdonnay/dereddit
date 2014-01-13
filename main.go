@@ -234,7 +234,7 @@ func init() {
 	userBlacklist = strings.Split(*ul, ",")
 	log.Printf("ignoring users: %v\n", userBlacklist)
 	cacheDir := fmt.Sprintf("%s/dereddit.cache", os.TempDir())
-	os.Mkdir(rssDir, 0777)
+	os.Mkdir(*rssDir, 0777)
 	if *apiKey == "" {
 		log.Fatalln("api key not specified")
 	}
@@ -301,7 +301,7 @@ func main() {
 					}
 					items = append(items, *ni)
 				}
-				feed, err := os.Create(fmt.Sprintf("%s/%s.xml", rssDir, reddit))
+				feed, err := os.Create(fmt.Sprintf("%s/%s.xml", *rssDir, reddit))
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -373,5 +373,5 @@ func main() {
 	sigusr1 <- syscall.SIGUSR1
 
 	log.Println("Starting HTTP server")
-	log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(rssDir))))
+	log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(*rssDir))))
 }
