@@ -286,9 +286,9 @@ func init() {
 		FilePerm:    0666,
 	}
 	cache = diskv.New(o)
-	log.Printf("confidence is set to: %f\n", *confidence)
-	log.Printf("cache %s opened\n", cacheDir)
-	log.Printf("outputting rss feeds to %s\n", *rssDir)
+	log.Printf("confidence set to %f\n", *confidence)
+	log.Printf("cache dir '%s' opened\n", cacheDir)
+	log.Printf("outputting rss feeds to '%s'\n", *rssDir)
 }
 
 func main() {
@@ -314,13 +314,13 @@ func main() {
 				select {
 				case u = <-update:
 					if noUpdate {
-						log.Printf("ignoring tick (%v) to update /r/%s\n", u, reddit)
+						log.Printf("ignoring tick to update /r/%s\n", reddit)
 						continue
 					} else {
-						log.Printf("recvd tick (%v) to update /r/%s\n", u, reddit)
+						log.Printf("received tick to update /r/%s\n", reddit)
 					}
 				case u = <-manual:
-					log.Printf("recvd manual tick (%v) to update /r/%s\n", u, reddit)
+					log.Printf("received signal to update /r/%s\n", reddit)
 				}
 				var subreddit rss
 				var items []Item
