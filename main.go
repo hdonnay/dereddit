@@ -35,11 +35,10 @@ var (
 	verbose    = flag.Bool("v", false, "Print additional information")
 	confidence = flag.Float64("c", 0.5, "Confidence threshold. Articles with parse confidence below this are not included.")
 
-	cache           *diskv.Diskv
-	subreddits      []string
-	userBlacklist   []string
-	noUpdate        = false
-	BelowConfidence = fmt.Errorf("Article below confidence threshold.")
+	cache         *diskv.Diskv
+	subreddits    []string
+	userBlacklist []string
+	noUpdate      = false
 )
 
 const (
@@ -91,6 +90,7 @@ type ReadabilityResp struct {
 	TotalPages int       `json:"total_pages"`
 	NextPageID int       `json:"next_page_id,omitempty"`
 	Date       time.Time `json:",omitempty"`
+	Confidence float64   `json:",omitempty"`
 }
 
 type redditStub struct {
@@ -165,16 +165,14 @@ func mkItem(desc string) (*Item, error) {
 		i.Description = fmt.Sprintf("<img src=\"%s\" alt=\"Image\" />", s.Link)
 	default:
 		r, err = readable(s.Link)
-		switch err {
-		case nil:
-			break
-		case BelowConfidence:
+		if err != nil {
+			return nil, err
+		}
+		if r.Confidence < *confidence {
 			if *verbose {
 				log.Printf("Ignoring: %s (below confidence)\n", s.Link)
 			}
 			return nil, nil
-		default:
-			return nil, err
 		}
 		i.Title = r.Title
 		i.Description = r.Content
@@ -217,20 +215,12 @@ func readable(article string) (ReadabilityResp, error) {
 		return loadCache(key), nil
 	}
 
+	if *verbose {
+		log.Printf("Fetching: %s\n", article)
+	}
 	c, err := checkConfidence(article)
 	if err != nil {
 		return r, err
-	}
-	if *verbose {
-		log.Printf("Checked: %s (%f)\n", article, c)
-	}
-
-	if c < *confidence {
-		return r, BelowConfidence
-	}
-
-	if *verbose {
-		log.Printf("Fetching: %s\n", article)
 	}
 	v := url.Values{}
 	v.Add("token", *apiKey)
@@ -241,8 +231,11 @@ func readable(article string) (ReadabilityResp, error) {
 	}
 	d := json.NewDecoder(res.Body)
 	d.Decode(&r)
-	r.Date = time.Now().UTC()
 	defer res.Body.Close()
+
+	r.Date = time.Now().UTC()
+	r.Confidence = c
+
 	b, err := json.Marshal(r)
 	if err != nil {
 		return r, err
@@ -256,7 +249,7 @@ func readable(article string) (ReadabilityResp, error) {
 
 func checkConfidence(u string) (float64, error) {
 	var r struct {
-		Url        string
+		URL        string `json:"url"`
 		Confidence float64
 	}
 	v := url.Values{}
