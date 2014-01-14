@@ -221,6 +221,10 @@ func readable(article string) (ReadabilityResp, error) {
 	if err != nil {
 		return r, err
 	}
+	if *verbose {
+		log.Printf("Checked: %s (%f)\n", article, c)
+	}
+
 	if c < *confidence {
 		return r, BelowConfidence
 	}
@@ -294,6 +298,7 @@ func init() {
 		FilePerm:    0666,
 	}
 	cache = diskv.New(o)
+	log.Printf("confidence is set to: %f\n", *confidence)
 	log.Printf("cache %s opened\n", cacheDir)
 	log.Printf("outputting rss feeds to %s\n", *rssDir)
 }
