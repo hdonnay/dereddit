@@ -309,17 +309,16 @@ func main() {
 		}
 		manual = append(manual, make(chan time.Time))
 		go func(reddit string, update <-chan time.Time, manual <-chan time.Time) {
-			var u time.Time
 			for {
 				select {
-				case u = <-update:
+				case <-update:
 					if noUpdate {
 						log.Printf("ignoring tick to update /r/%s\n", reddit)
 						continue
 					} else {
 						log.Printf("received tick to update /r/%s\n", reddit)
 					}
-				case u = <-manual:
+				case <-manual:
 					log.Printf("received signal to update /r/%s\n", reddit)
 				}
 				var subreddit rss
