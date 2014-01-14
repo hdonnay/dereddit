@@ -23,27 +23,29 @@ import (
 )
 
 var (
-	apiKey    = flag.String("a", "", "Readibility API Key")
-	sr        = flag.String("r", "golang", "Comma separated list of subreddits to create rss feeds for.")
-	update    = flag.Int("u", 30, "Update interval (in minutes)")
-	noListen  = flag.Bool("n", false, "don't start the internal HTTP server")
-	listen    = flag.String("l", ":8080", "Address to listen on")
-	ul        = flag.String("U", "", "Comma separated list of users to ignore.")
-	selfOK    = flag.Bool("s", false, "Allow self posts into generated feed.")
-	purgeTime = flag.Int("P", 7, "Time to purge articles after, in days.")
-	rssDir    = flag.String("d", fmt.Sprintf("%s/dereddit", os.TempDir()), "Directory to output rss feeds to.")
-	verbose   = flag.Bool("v", false, "Print additional information")
+	apiKey     = flag.String("a", "", "Readibility API Key")
+	sr         = flag.String("r", "golang", "Comma separated list of subreddits to create rss feeds for.")
+	update     = flag.Int("u", 30, "Update interval (in minutes)")
+	noListen   = flag.Bool("n", false, "don't start the internal HTTP server")
+	listen     = flag.String("l", ":8080", "Address to listen on")
+	ul         = flag.String("U", "", "Comma separated list of users to ignore.")
+	selfOK     = flag.Bool("s", false, "Allow self posts into generated feed.")
+	purgeTime  = flag.Int("P", 7, "Time to purge articles after, in days.")
+	rssDir     = flag.String("d", fmt.Sprintf("%s/dereddit", os.TempDir()), "Directory to output rss feeds to.")
+	verbose    = flag.Bool("v", false, "Print additional information")
+	confidence = flag.Float64("c", 0.5, "Confidence threshold. Articles with parse confidence below this are not included.")
 
-	cache         *diskv.Diskv
-	subreddits    []string
-	userBlacklist []string
-	noUpdate      = false
+	cache           *diskv.Diskv
+	subreddits      []string
+	userBlacklist   []string
+	noUpdate        = false
+	BelowConfidence = fmt.Errorf("Article below confidence threshold.")
 )
 
 const (
 	// Version (in case we want to print it out later)
 	Version     = "0.4.0"
-	readability = "http://www.readability.com/api/content/v1/parser"
+	readability = "http://www.readability.com/api/content/v1/"
 )
 
 type rss struct {
@@ -163,7 +165,15 @@ func mkItem(desc string) (*Item, error) {
 		i.Description = fmt.Sprintf("<img src=\"%s\" alt=\"Image\" />", s.Link)
 	default:
 		r, err = readable(s.Link)
-		if err != nil {
+		switch err {
+		case nil:
+			break
+		case BelowConfidence:
+			if *verbose {
+				log.Printf("Ignoring: %s (below confidence)\n", s.Link)
+			}
+			return nil, nil
+		default:
 			return nil, err
 		}
 		i.Title = r.Title
@@ -197,7 +207,8 @@ func loadCache(key string) (r ReadabilityResp) {
 	return
 }
 
-func readable(article string) (r ReadabilityResp, err error) {
+func readable(article string) (ReadabilityResp, error) {
+	var r ReadabilityResp
 	key := urlToKey(article)
 	if cache.Has(key) {
 		if *verbose {
@@ -205,15 +216,24 @@ func readable(article string) (r ReadabilityResp, err error) {
 		}
 		return loadCache(key), nil
 	}
+
+	c, err := checkConfidence(article)
+	if err != nil {
+		return r, err
+	}
+	if c < *confidence {
+		return r, BelowConfidence
+	}
+
 	if *verbose {
 		log.Printf("Fetching: %s\n", article)
 	}
 	v := url.Values{}
 	v.Add("token", *apiKey)
 	v.Add("url", article)
-	res, err := http.Get(fmt.Sprintf("%s?%s", readability, v.Encode()))
+	res, err := http.Get(fmt.Sprintf("%s?%s", fmt.Sprintf("%s/parser", readability), v.Encode()))
 	if err != nil {
-		return
+		return r, err
 	}
 	d := json.NewDecoder(res.Body)
 	d.Decode(&r)
@@ -221,13 +241,30 @@ func readable(article string) (r ReadabilityResp, err error) {
 	defer res.Body.Close()
 	b, err := json.Marshal(r)
 	if err != nil {
-		return
+		return r, err
 	}
 	err = cache.Write(key, b)
 	if err != nil {
 		log.Println(err)
 	}
-	return
+	return r, nil
+}
+
+func checkConfidence(u string) (float64, error) {
+	var r struct {
+		url        string
+		confidence float64
+	}
+	v := url.Values{}
+	v.Add("url", u)
+	res, err := http.Get(fmt.Sprintf("%s?%s", fmt.Sprintf("%s/confidence", readability), v.Encode()))
+	if err != nil {
+		return 0.0, err
+	}
+	d := json.NewDecoder(res.Body)
+	defer res.Body.Close()
+	d.Decode(&r)
+	return r.confidence, nil
 }
 
 func init() {
