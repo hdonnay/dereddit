@@ -256,8 +256,8 @@ func readable(article string) (ReadabilityResp, error) {
 
 func checkConfidence(u string) (float64, error) {
 	var r struct {
-		url        string
-		confidence float64
+		Url        string
+		Confidence float64
 	}
 	v := url.Values{}
 	v.Add("url", u)
@@ -268,7 +268,7 @@ func checkConfidence(u string) (float64, error) {
 	d := json.NewDecoder(res.Body)
 	defer res.Body.Close()
 	d.Decode(&r)
-	return r.confidence, nil
+	return r.Confidence, nil
 }
 
 func init() {
