@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 	"time"
@@ -35,6 +36,7 @@ var (
 	rssDir     = flag.String("d", fmt.Sprintf("%s/dereddit", os.TempDir()), "Directory to output rss feeds to.")
 	verbose    = flag.Bool("v", false, "Print additional information")
 	confidence = flag.Float64("c", 0.5, "Confidence threshold. Articles with parse confidence below this are not included.")
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 	cache         *diskv.Diskv
 	subreddits    []string
@@ -295,6 +297,15 @@ func init() {
 }
 
 func main() {
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
 	var manual []chan time.Time
 	sigusr1 := make(chan os.Signal, 1)
 	signal.Notify(sigusr1, syscall.SIGUSR1)
