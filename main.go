@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"code.google.com/p/go.net/html"
+	"encoding/gob"
 	"encoding/json"
 	"encoding/xml"
 	"flag"
@@ -197,7 +198,7 @@ func loadCache(key string) (r ReadabilityResp) {
 	if err != nil {
 		return
 	}
-	d := json.NewDecoder(bytes.NewReader(b))
+	d := gob.NewDecoder(bytes.NewReader(b))
 	err = d.Decode(&r)
 	if err != nil {
 		return
@@ -231,11 +232,13 @@ func readable(article string) (ReadabilityResp, error) {
 
 	r.Date = time.Now().UTC()
 
-	b, err := json.Marshal(r)
+	b := bytes.Buffer{}
+	enc := gob.NewEncoder(b)
+	err = enc.Encode(r)
 	if err != nil {
 		return r, err
 	}
-	err = cache.Write(key, b)
+	err = cache.WriteStream(key, b, false)
 	if err != nil {
 		log.Println(err)
 	}
@@ -280,10 +283,10 @@ func init() {
 		log.Fatalln("api key not specified")
 	}
 	o := diskv.Options{
-		BasePath:    cacheDir,
-		Compression: diskv.NewGzipCompression(),
-		PathPerm:    0755,
-		FilePerm:    0666,
+		BasePath: cacheDir,
+		//Compression: diskv.NewGzipCompression(),
+		PathPerm: 0755,
+		FilePerm: 0666,
 	}
 	cache = diskv.New(o)
 	log.Printf("confidence set to %f\n", *confidence)
