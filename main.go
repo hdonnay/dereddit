@@ -232,7 +232,7 @@ func readable(article string) (ReadabilityResp, error) {
 
 	r.Date = time.Now().UTC()
 
-	b := bytes.Buffer{}
+	b := new(bytes.Buffer)
 	enc := gob.NewEncoder(b)
 	err = enc.Encode(r)
 	if err != nil {
