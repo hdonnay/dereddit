@@ -4,13 +4,11 @@ package main
 
 import (
 	"bytes"
-	"code.google.com/p/go.net/html"
 	"encoding/gob"
 	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
-	"github.com/peterbourgon/diskv"
 	"hash/fnv"
 	"io"
 	"log"
@@ -21,6 +19,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"code.google.com/p/go.net/html"
+	"github.com/peterbourgon/diskv"
 )
 
 var (
@@ -262,6 +263,53 @@ func checkConfidence(u string) (float64, error) {
 	return r.Confidence, nil
 }
 
+func writeFeed(reddit string, items *[]Item) {
+	feed, err := os.Create(fmt.Sprintf("%s/%s.xml", *rssDir, reddit))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer feed.Close()
+	now := time.Now().UTC().Format(time.RFC822)
+	io.WriteString(feed, xml.Header)
+	e := xml.NewEncoder(feed)
+	f := rss{
+		Version: "2.0",
+		Channels: []Channel{Channel{
+			Title:         reddit,
+			Docs:          "http://blogs.law.harvard.edu/tech/rss",
+			Language:      "en-us",
+			PubDate:       now,
+			LastBuildDate: now,
+			Description:   fmt.Sprintf("Articles pulled from /r/%s", reddit),
+			Link:          fmt.Sprintf("http://www.reddit.com/r/%s", reddit),
+			Generator:     fmt.Sprintf("dereddit v%s", Version),
+			Items:         *items},
+		},
+	}
+	err = e.Encode(f)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func fetchRSS(reddit string) *rss {
+	var subreddit *rss
+	r, err := http.Get(fmt.Sprintf("http://www.reddit.com/r/%s/.rss", reddit))
+	if err != nil {
+		log.Print(err)
+		return subreddit
+	}
+	defer r.Body.Close()
+	d := xml.NewDecoder(r.Body)
+	d.Strict = false
+	err = d.Decode(subreddit)
+	if err != nil {
+		log.Print(err)
+		return subreddit
+	}
+	return subreddit
+}
+
 func init() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -324,19 +372,9 @@ func main() {
 				case <-manual:
 					log.Printf("received signal to update /r/%s\n", reddit)
 				}
-				var subreddit rss
+
 				var items []Item
-				r, err := http.Get(fmt.Sprintf("http://www.reddit.com/r/%s/.rss", reddit))
-				if err != nil {
-					log.Fatal(err)
-				}
-				d := xml.NewDecoder(r.Body)
-				d.Strict = false
-				defer r.Body.Close()
-				err = d.Decode(&subreddit)
-				if err != nil {
-					log.Fatal(err)
-				}
+				subreddit := fetchRSS(reddit)
 				for _, i := range subreddit.Channels[0].Items {
 					ni, err := mkItem(i.Description)
 					if err != nil {
@@ -348,33 +386,7 @@ func main() {
 					}
 					items = append(items, *ni)
 				}
-				feed, err := os.Create(fmt.Sprintf("%s/%s.xml", *rssDir, reddit))
-				if err != nil {
-					log.Fatal(err)
-				}
-				io.WriteString(feed, xml.Header)
-				e := xml.NewEncoder(feed)
-				e.Indent("", "\t")
-				now := time.Now().UTC().Format(time.RFC822)
-				f := rss{
-					Version: "2.0",
-					Channels: []Channel{Channel{
-						Title:         reddit,
-						Docs:          "http://blogs.law.harvard.edu/tech/rss",
-						Language:      "en-us",
-						PubDate:       now,
-						LastBuildDate: now,
-						Description:   fmt.Sprintf("Articles pulled from /r/%s", reddit),
-						Link:          fmt.Sprintf("http://www.reddit.com/r/%s", reddit),
-						Generator:     fmt.Sprintf("dereddit v%s", Version),
-						Items:         items},
-					},
-				}
-				err = e.Encode(f)
-				if err != nil {
-					log.Println(err)
-				}
-				feed.Close()
+				writeFeed(reddit, &items)
 			}
 		}(reddit, ticker.C, manual[i])
 	}
