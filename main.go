@@ -49,55 +49,189 @@ const (
 	readability = "http://www.readability.com/api/content/v1/"
 )
 
-type rss struct {
-	Channels []Channel `xml:"channel"`
-	Version  string    `xml:"version,attr"`
+type (
+	rss struct {
+		Channels []Channel `xml:"channel"`
+		Version  string    `xml:"version,attr"`
+	}
+
+	// Channel is an RSS Channel
+	Channel struct {
+		Docs          string
+		Title         string `xml:"title"`
+		Link          string `xml:"link"`
+		Description   string `xml:"description"`
+		Language      string `xml:"language"`
+		WebMaster     string `xml:"webMaster,omitempty"`
+		Generator     string `xml:"generator"`
+		PubDate       string `xml:"pubDate"`
+		LastBuildDate string `xml:"lastBuildDate"`
+		Items         []Item `xml:"item"`
+	}
+
+	// Item is an RSS Item
+	Item struct {
+		Title       string `xml:"title"`
+		Link        string `xml:"link"`
+		Description string `xml:"description"`
+		Author      string `xml:"author,omitempty"`
+		Category    string `xml:"category,omitempty"`
+		Comments    string `xml:"comments,omitempty"`
+		GUID        string `xml:"guid,omitempty"`
+		//PubDate     time.Time `xml:"pubDate"`
+	}
+
+	// ReadabilityResp is the response we get back
+	ReadabilityResp struct {
+		Author     string
+		Content    string
+		Domain     string
+		Title      string
+		Excerpt    string
+		Direction  string
+		WordCount  int       `json:"word_count"`
+		TotalPages int       `json:"total_pages"`
+		NextPageID int       `json:"next_page_id,omitempty"`
+		Date       time.Time `json:",omitempty"`
+	}
+
+	redditStub struct {
+		Link     string
+		User     string
+		Comments string
+	}
+)
+
+func init() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Updates can be triggered by sending SIGUSR1.")
+		fmt.Fprintln(os.Stderr, "Automatic updates can be toggled by sending SIGUSR2.")
+		fmt.Fprintln(os.Stderr, "A cache purge can be triggered by sending SIGHUP.")
+		fmt.Fprintln(os.Stderr)
+	}
+	flag.Parse()
+	subreddits = strings.Split(*sr, ",")
+	log.Printf("watching subreddits: %v\n", subreddits)
+	userBlacklist = strings.Split(*ul, ",")
+	log.Printf("ignoring users: %v\n", userBlacklist)
+	cacheDir := fmt.Sprintf("%s/dereddit.cache", os.TempDir())
+	os.Mkdir(*rssDir, 0777)
+	if *apiKey == "" {
+		log.Fatalln("api key not specified")
+	}
+	o := diskv.Options{
+		BasePath: cacheDir,
+		//Compression: diskv.NewGzipCompression(),
+		PathPerm: 0755,
+		FilePerm: 0666,
+	}
+	cache = diskv.New(o)
+	log.Printf("confidence set to %f\n", *confidence)
+	log.Printf("cache dir '%s' opened\n", cacheDir)
+	log.Printf("outputting rss feeds to '%s'\n", *rssDir)
 }
 
-// Channel is an RSS Channel
-type Channel struct {
-	Docs          string
-	Title         string `xml:"title"`
-	Link          string `xml:"link"`
-	Description   string `xml:"description"`
-	Language      string `xml:"language"`
-	WebMaster     string `xml:"webMaster,omitempty"`
-	Generator     string `xml:"generator"`
-	PubDate       string `xml:"pubDate"`
-	LastBuildDate string `xml:"lastBuildDate"`
-	Items         []Item `xml:"item"`
-}
+func main() {
+	var manual []chan time.Time
+	sigusr1 := make(chan os.Signal, 1)
+	signal.Notify(sigusr1, syscall.SIGUSR1)
 
-// Item is an RSS Item
-type Item struct {
-	Title       string `xml:"title"`
-	Link        string `xml:"link"`
-	Description string `xml:"description"`
-	Author      string `xml:"author,omitempty"`
-	Category    string `xml:"category,omitempty"`
-	Comments    string `xml:"comments,omitempty"`
-	GUID        string `xml:"guid,omitempty"`
-	//PubDate     time.Time `xml:"pubDate"`
-}
+	toggleUpdate := make(chan os.Signal, 1)
+	signal.Notify(toggleUpdate, syscall.SIGUSR2)
 
-// ReadabilityResp is the response we get back
-type ReadabilityResp struct {
-	Author     string
-	Content    string
-	Domain     string
-	Title      string
-	Excerpt    string
-	Direction  string
-	WordCount  int       `json:"word_count"`
-	TotalPages int       `json:"total_pages"`
-	NextPageID int       `json:"next_page_id,omitempty"`
-	Date       time.Time `json:",omitempty"`
-}
+	cleanCache := make(chan os.Signal, 1)
+	signal.Notify(cleanCache, syscall.SIGHUP)
 
-type redditStub struct {
-	Link     string
-	User     string
-	Comments string
+	for i, reddit := range subreddits {
+		ticker := time.NewTicker(time.Duration(*update) * time.Minute)
+		if *verbose {
+			log.Printf("Launching goroutine for %s\n", reddit)
+		}
+		manual = append(manual, make(chan time.Time))
+		go func(reddit string, update <-chan time.Time, manual <-chan time.Time) {
+			for {
+				select {
+				case <-update:
+					if noUpdate {
+						log.Printf("ignoring tick to update /r/%s\n", reddit)
+						continue
+					} else {
+						log.Printf("received tick to update /r/%s\n", reddit)
+					}
+				case <-manual:
+					log.Printf("received signal to update /r/%s\n", reddit)
+				}
+
+				var items []Item
+				subreddit := fetchRSS(reddit)
+				for _, i := range subreddit.Channels[0].Items {
+					ni, err := mkItem(i.Description)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					if ni == nil {
+						continue
+					}
+					items = append(items, *ni)
+				}
+				writeFeed(reddit, &items)
+			}
+		}(reddit, ticker.C, manual[i])
+	}
+
+	go func(c <-chan os.Signal) {
+		tick := time.Tick(time.Duration(12) * time.Hour)
+		for {
+			select {
+			case <-c:
+			case <-tick:
+			}
+			log.Println("Cache clean triggered.")
+			for c := range cache.Keys() {
+				a := loadCache(c)
+				if time.Since(a.Date) > (time.Duration(*purgeTime) * (time.Duration(24) * time.Hour)) {
+					if *verbose {
+						log.Printf("Expiring cache: %s\n", c)
+					}
+					cache.Erase(c)
+				}
+			}
+		}
+	}(cleanCache)
+
+	go func(c <-chan os.Signal) {
+		for _ = range c {
+			noUpdate = !noUpdate
+			if noUpdate {
+				log.Println("automatic updates: off")
+			} else {
+				log.Println("automatic updates: on")
+			}
+		}
+	}(toggleUpdate)
+
+	go func(c <-chan os.Signal) {
+		for _ = range c {
+			for i := range subreddits {
+				manual[i] <- time.Now().UTC()
+			}
+		}
+	}(sigusr1)
+
+	cleanCache <- syscall.SIGHUP
+	sigusr1 <- syscall.SIGUSR1
+
+	if !*noListen {
+		log.Println("Starting HTTP server")
+		log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(*rssDir))))
+	} else {
+		var ch chan bool
+		<-ch
+	}
 }
 
 func parseStub(stub string) (r redditStub, err error) {
@@ -308,136 +442,4 @@ func fetchRSS(reddit string) *rss {
 		return subreddit
 	}
 	return subreddit
-}
-
-func init() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-		flag.PrintDefaults()
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Updates can be triggered by sending SIGUSR1.")
-		fmt.Fprintln(os.Stderr, "Automatic updates can be toggled by sending SIGUSR2.")
-		fmt.Fprintln(os.Stderr, "A cache purge can be triggered by sending SIGHUP.")
-		fmt.Fprintln(os.Stderr)
-	}
-	flag.Parse()
-	subreddits = strings.Split(*sr, ",")
-	log.Printf("watching subreddits: %v\n", subreddits)
-	userBlacklist = strings.Split(*ul, ",")
-	log.Printf("ignoring users: %v\n", userBlacklist)
-	cacheDir := fmt.Sprintf("%s/dereddit.cache", os.TempDir())
-	os.Mkdir(*rssDir, 0777)
-	if *apiKey == "" {
-		log.Fatalln("api key not specified")
-	}
-	o := diskv.Options{
-		BasePath: cacheDir,
-		//Compression: diskv.NewGzipCompression(),
-		PathPerm: 0755,
-		FilePerm: 0666,
-	}
-	cache = diskv.New(o)
-	log.Printf("confidence set to %f\n", *confidence)
-	log.Printf("cache dir '%s' opened\n", cacheDir)
-	log.Printf("outputting rss feeds to '%s'\n", *rssDir)
-}
-
-func main() {
-	var manual []chan time.Time
-	sigusr1 := make(chan os.Signal, 1)
-	signal.Notify(sigusr1, syscall.SIGUSR1)
-
-	toggleUpdate := make(chan os.Signal, 1)
-	signal.Notify(toggleUpdate, syscall.SIGUSR2)
-
-	cleanCache := make(chan os.Signal, 1)
-	signal.Notify(cleanCache, syscall.SIGHUP)
-
-	for i, reddit := range subreddits {
-		ticker := time.NewTicker(time.Duration(*update) * time.Minute)
-		if *verbose {
-			log.Printf("Launching goroutine for %s\n", reddit)
-		}
-		manual = append(manual, make(chan time.Time))
-		go func(reddit string, update <-chan time.Time, manual <-chan time.Time) {
-			for {
-				select {
-				case <-update:
-					if noUpdate {
-						log.Printf("ignoring tick to update /r/%s\n", reddit)
-						continue
-					} else {
-						log.Printf("received tick to update /r/%s\n", reddit)
-					}
-				case <-manual:
-					log.Printf("received signal to update /r/%s\n", reddit)
-				}
-
-				var items []Item
-				subreddit := fetchRSS(reddit)
-				for _, i := range subreddit.Channels[0].Items {
-					ni, err := mkItem(i.Description)
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-					if ni == nil {
-						continue
-					}
-					items = append(items, *ni)
-				}
-				writeFeed(reddit, &items)
-			}
-		}(reddit, ticker.C, manual[i])
-	}
-
-	go func(c <-chan os.Signal) {
-		tick := time.Tick(time.Duration(12) * time.Hour)
-		for {
-			select {
-			case <-c:
-			case <-tick:
-			}
-			log.Println("Cache clean triggered.")
-			for c := range cache.Keys() {
-				a := loadCache(c)
-				if time.Since(a.Date) > (time.Duration(*purgeTime) * (time.Duration(24) * time.Hour)) {
-					if *verbose {
-						log.Printf("Expiring cache: %s\n", c)
-					}
-					cache.Erase(c)
-				}
-			}
-		}
-	}(cleanCache)
-
-	go func(c <-chan os.Signal) {
-		for _ = range c {
-			noUpdate = !noUpdate
-			if noUpdate {
-				log.Println("automatic updates: off")
-			} else {
-				log.Println("automatic updates: on")
-			}
-		}
-	}(toggleUpdate)
-
-	go func(c <-chan os.Signal) {
-		for _ = range c {
-			for i := range subreddits {
-				manual[i] <- time.Now().UTC()
-			}
-		}
-	}(sigusr1)
-
-	cleanCache <- syscall.SIGHUP
-	sigusr1 <- syscall.SIGUSR1
-
-	if !*noListen {
-		log.Println("Starting HTTP server")
-		log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(*rssDir))))
-	} else {
-		var ch chan bool
-		<-ch
-	}
 }
