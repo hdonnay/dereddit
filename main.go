@@ -135,6 +135,7 @@ func init() {
 }
 
 func main() {
+	defer log.Println("Exiting...")
 	var manual []chan time.Time
 	sigusr1 := make(chan os.Signal, 1)
 	signal.Notify(sigusr1, syscall.SIGUSR1)
@@ -144,6 +145,9 @@ func main() {
 
 	cleanCache := make(chan os.Signal, 1)
 	signal.Notify(cleanCache, syscall.SIGHUP)
+
+	term := make(chan os.Signal, 1)
+	signal.Notify(term, os.Interrupt, os.Kill)
 
 	for i, reddit := range subreddits {
 		ticker := time.NewTicker(time.Duration(*update) * time.Minute)
@@ -226,12 +230,12 @@ func main() {
 	sigusr1 <- syscall.SIGUSR1
 
 	if !*noListen {
-		log.Println("Starting HTTP server")
-		log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(*rssDir))))
-	} else {
-		var ch chan bool
-		<-ch
+		go func() {
+			log.Println("Starting HTTP server")
+			log.Fatal(http.ListenAndServe(*listen, http.FileServer(http.Dir(*rssDir))))
+		}()
 	}
+	<-term
 }
 
 func parseStub(stub string) (r redditStub, err error) {
