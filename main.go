@@ -427,19 +427,19 @@ func writeFeed(reddit string, items *[]Item) {
 }
 
 func fetchRSS(reddit string) *rss {
-	var subreddit *rss
+	var subreddit rss
 	r, err := http.Get(fmt.Sprintf("http://www.reddit.com/r/%s/.rss", reddit))
 	if err != nil {
 		log.Print(err)
-		return subreddit
+		return &subreddit
 	}
 	defer r.Body.Close()
 	d := xml.NewDecoder(r.Body)
 	d.Strict = false
-	err = d.Decode(subreddit)
+	err = d.Decode(&subreddit)
 	if err != nil {
 		log.Print(err)
-		return subreddit
+		return &subreddit
 	}
-	return subreddit
+	return &subreddit
 }
